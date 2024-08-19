@@ -1,0 +1,653 @@
+---
+title: 'Final Project: Analysis of Rehabilitation Rates for Stroke Patients in Taiwan '
+author: "PoYu Lin"
+date: "2024-08-14"
+output:
+  slidy_presentation: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE) 
+```
+
+# Background and Context
+
+## Background
+
+The first six months after a stroke is the golden period for rehabilitation, during which motor abilities recover the fastest.
+
+For patients undergoing rehabilitation:
+
+- About 40% of stroke patients experience good recovery of upper limb function.
+- About 85% can walk independently after lower limb training.
+
+## Aim of this project
+
+This project uses the *"Rate of Stroke Patients Receiving Rehabilitation Services During Hospitalization or Within Four Months After Discharge"* dataset, published by the Taiwanese government.
+
+By combining the geographic data, hospital levels, and time information within the dataset, I analyze the distribution of medical resources for stroke rehabilitation in Taiwan.
+
+```{r}
+#Suppress unnecessary messages to create a clean slide
+options(warn = -1)
+suppressMessages({
+  library(sf)
+  library(ggplot2)
+  library(broom)
+  library(dplyr)
+  library(tidyr)
+  library(tidyverse)
+  library(tmap)
+})
+```
+
+
+***
+
+# Methods: Load in the Main Dataset
+
+The original dataset, *"Rate of Stroke Patients Receiving Rehabilitation Services During Hospitalization or Within Four Months After Discharge"*, can be downloaded from the link below:
+
+https://data.gov.tw/dataset/79568
+
+## Load in the pre-processed dataset
+
+Since the *season* information was originally recorded in Chinese, I have translated it and uploaded the pre-processed dataset onto GitHub. If your computer cannot read Chinese, please use the following code to load the data that I have already converted to English.
+
+```{r}
+MainData <- read.csv("https://raw.githubusercontent.com/VilcekSummerR/final-assignment-Po-yuLin/main/TaiwanStrokeRehab.csv")
+head(MainData)
+```
+
+***
+
+# Methods: Load in the Main Dataset
+
+## Code for data preprocessing 
+
+My code for main data pre-processing is listed below. If your computer can read Chinese, you can use the code in this section to download the file from the official source.
+
+```{r eval = FALSE}
+#install.packages("dplyr")
+library(dplyr)
+
+#Read in the data from the official website of National Health Insurance, Taiwan
+MainData <- read.csv("https://info.nhi.gov.tw/api/iode0000s01/Dataset?rId=A21003000I-E3201N-001")
+
+#Remove the Chinese names of the hospitals to avoid display issues on other computer
+MainData <- MainData[,-3]
+
+#Rename the column name into English Version
+names(MainData) <- c("Year_Season", "HospitalID", "HospitalClass", 
+                     "StrokeRehabNumber", "StrokeNumber", 
+                     "StrokeRehabRate", "StrokeRehabRegionRate", 
+                     "StrokeRehabCountryRate", "CityCode", "TownCode")
+
+#Reorganize the season information to eliminate Chinese in the table
+MainData$Year_Season <- gsub("(\\d{4})年第一季", "\\1_1", MainData$Year_Season)
+MainData$Year_Season <- gsub("(\\d{4})年第二季", "\\1_2", MainData$Year_Season)
+MainData$Year_Season <- gsub("(\\d{4})年第三季", "\\1_3", MainData$Year_Season)
+MainData$Year_Season <- gsub("(\\d{4})年第四季", "\\1_4", MainData$Year_Season)
+
+head(MainData)
+```
+
+***
+
+# Methods: Load in the Map of Taiwan
+
+The original map dataset of Taiwan *“Administrative Boundary Maps of Municipalities and Counties (Cities) in Our Country,”* can be downloaded from Taiwan Ministry of the Interior Geographic Information Cloud Integration Service Platform. The original map can be found in the link below:
+
+https://www.tgos.tw/MDE/MetaData/CRUD/ViewMetaData?GUID=801bf681-5fbf-4185-9b46-3760eaba4e63&VIEW_TYPE=only&SOURCE=1
+
+## Load in the pre-processed map
+
+Since the *Name of County/City* information was originally recorded in Chinese, I have translated it. 
+
+Additionally, the original map covered too wide an area and lacked centroid information for each *County/City*. 
+
+I have addressed these issues and uploaded the pre-processed dataset onto GitHub. If your computer cannot read Chinese, please use the following code to load the data that I have already converted to English.
+
+```{r}
+#install.packages("sf")
+#install.packages("ggplot2")
+library(sf)
+library(ggplot2)
+
+download.file("https://github.com/VilcekSummerR/final-assignment-Po-yuLin/raw/main/TaiwanMap_English.zip", destfile = "TaiwanMap_English.zip")
+unzip("TaiwanMap_English.zip", exdir = "TaiwanMap_English")
+
+TaiwanMap <- st_read("TaiwanMap_English/COUNTY_MOI_1130718.shp")
+
+ggplot(data = TaiwanMap) +
+  geom_sf(aes(fill = COUNTYNAME)) +
+  scale_fill_discrete(name = "County/City") +
+  geom_text(aes(x = x, y = y, label = COUNTYNAME), size = 2, color = "black") +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+***
+
+# Methods: Load in the Map of Taiwan
+
+## Code for map preprocessing 
+
+My code for map data pre-processing is listed in the following two code chunks. I have uploaded the original map to the project GitHub. If your computer can read Chinese, you can use the code in this section to download the original file from GitHub.
+
+```{r eval = FALSE}
+library(sf)
+library(ggplot2)
+
+download.file("https://github.com/VilcekSummerR/final-assignment-Po-yuLin/raw/main/TaiwanMap.zip", destfile = "TaiwanMap.zip")
+unzip("TaiwanMap.zip", exdir = "TaiwanMap")
+
+TaiwanMap <- st_read("TaiwanMap/COUNTY_MOI_1130718.shp")
+
+ggplot(data = TaiwanMap) +
+  geom_sf(aes(fill = COUNTYNAME)) +
+  scale_fill_discrete(name = "County/City") +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+The original map covers a wide area, and the *Name of County/City* are in Chinese. Therefore, I used the following code to translate them into English and adjust the map to the appropriate area. Also, I calculated the centriod of each *County/City*.
+
+```{r eval = FALSE}
+library(dplyr)
+library(sf)
+
+#Check the list of COUNTYNAME and translate them into English
+#unique(TaiwanMap$COUNTYNAME)
+
+#Translate Name of County/City into English
+TaiwanMap <- TaiwanMap %>% mutate(
+  COUNTYNAME = recode(COUNTYNAME,
+                      "臺東縣" = "Taitung County",
+                      "屏東縣" = "Pingtung County", 
+                      "雲林縣" = "Yunlin County",
+                      "彰化縣" = "Changhua County", 
+                      "苗栗縣" = "Miaoli County", 
+                      "新竹縣" = "Hsinchu County", 
+                      "嘉義縣" = "Chiayi County", 
+                      "高雄市" = "Kaohsiung City", 
+                      "宜蘭縣" = "Yilan County", 
+                      "連江縣" = "Lienchiang County", 
+                      "金門縣" = "Kinmen County", 
+                      "臺中市" = "Taichung City", 
+                      "澎湖縣" = "Penghu County", 
+                      "南投縣" = "Nantou County", 
+                      "花蓮縣" = "Hualien County", 
+                      "基隆市" = "Keelung City", 
+                      "臺北市" = "Taipei City", 
+                      "新北市" = "New Taipei City", 
+                      "臺南市" = "Tainan City", 
+                      "桃園市" = "Taoyuan City", 
+                      "嘉義市" = "Chiayi City", 
+                      "新竹市" = "Hsinchu City"
+                      )
+  )
+
+#Adjust the map to the appropriate area
+#st_bbox(TaiwanMap)
+MapShowBox <- st_bbox(c(xmin = 118, xmax = 124, ymin = 21, ymax = 27))
+TaiwanMap <- st_crop(TaiwanMap, MapShowBox)
+
+#Calculate the centroid of each county (This was aided by Microsoft Copilot)
+TaiwanMap <- TaiwanMap %>% select(COUNTYNAME, COUNTYCODE, geometry) %>%
+  mutate(centroid = st_centroid(geometry)) %>%
+  mutate(coords = st_coordinates(centroid)) %>%
+  mutate(x = coords[, 1], y = coords[, 2]) %>%
+  select(-centroid, -coords)
+
+ggplot(data = TaiwanMap) +
+  geom_sf(aes(fill = COUNTYNAME)) +
+  scale_fill_discrete(name = "County/City") +
+  geom_text(aes(x = x, y = y, label = COUNTYNAME), size = 2, color = "black") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+#Save the pre-processed map
+#st_write(TaiwanMap, "TaiwanMap_English/COUNTY_MOI_1130718.shp")
+```
+
+We can also plot an interactive map with **tmap** library.
+
+```{r eval = FALSE}
+#install.packages("tmap")
+library(tmap)
+
+tmap_mode("view")
+
+tm_shape(TaiwanMap) +
+  tm_polygons("COUNTYNAME", palette = "Set3", title = "County/City") +
+  tm_text("COUNTYNAME", x = "x", y = "y", size = 0.5, col = "black") +
+  tm_layout() +
+  tm_view(view.legend.position = c("right", "bottom"))
+```
+
+
+***
+
+# Methods: Data Cleaning
+
+## Check for data structure of the main data
+
+First, I check the datatype in each column using the **sapply()** function, and I change the datatype of *HospitalClass* to a factor using **recode_factor()**. The datatypes of the other columns are correct.
+
+```{r}
+library(dplyr)
+
+sapply(MainData, class)
+
+MainData$HospitalClass <- recode_factor(MainData$HospitalClass, "1" = "Medical Center", "2" = "Regional Hospital", "3" = "Local Hospital")
+
+MainData$CityCode <- as.character(MainData$CityCode)
+
+sapply(MainData[c("HospitalClass","CityCode")], class)
+```
+
+***
+
+# Methods: Data Cleaning
+
+## Divide Year-Season into two columns
+
+Second, I tried to divide the first column, *Year_Season*, into two columns, Year and Season. The datatype for these two new columns should be integer or numeric.
+
+```{r}
+#install.packages("tidyr")
+library(tidyr)
+
+head(MainData$Year_Season)
+
+MainData <- MainData %>% separate(Year_Season, into = c("Year", "Season"), sep = "_")
+
+MainData[c("Year", "Season")] <- lapply(MainData[c("Year", "Season")], as.numeric)
+
+sapply(MainData[c("Year", "Season")], class)
+```
+
+***
+# Methods: Data Cleaning
+
+## Make the column name in main data and map data the same.
+
+Third, I change the *MainData* column *CityCode* to *COUNTYCODE* to match the column names in the map file. At the same time, I manually handle the three mismatched COUNTYCODE values.
+
+Then, using this consistent column, I bring *COUNTYNAME* from the map into the *MainData*.
+
+```{r}
+library(dplyr)
+
+MainData <- MainData %>% rename("COUNTYCODE" = "CityCode")
+
+#generate a table for COUNTYCODE and COUNTYNAME in map
+TaiwanMapUnique <- TaiwanMap %>% group_by(COUNTYCODE) %>% summarise(COUNTYNAME = first(COUNTYNAME))
+
+#find the mismatch value, and change them to correct correlation value
+#Mismatch <- setdiff(unique(MainData$COUNTYCODE), TaiwanMapUnique$COUNTYCODE)
+#print(Mismatch)
+
+#Mismatch2 <- setdiff(TaiwanMapUnique$COUNTYCODE, unique(MainData$COUNTYCODE))
+#print(Mismatch2)
+
+MainData$COUNTYCODE <- gsub("10021", "67000", MainData$COUNTYCODE)
+MainData$COUNTYCODE <- gsub("9020", "09020", MainData$COUNTYCODE)
+MainData$COUNTYCODE <- gsub("9007", "09007", MainData$COUNTYCODE)
+
+MainData <- left_join(MainData, TaiwanMapUnique, by = "COUNTYCODE")
+
+#Delete unnecessary columns
+MainData <- MainData[c("Year", "Season", "HospitalID", "HospitalClass", "StrokeRehabNumber", "StrokeNumber", "StrokeRehabRate", "StrokeRehabRegionRate", "StrokeRehabCountryRate", "COUNTYCODE", "COUNTYNAME")]
+
+summary(MainData)
+```
+
+***
+# Methods: Data Cleaning
+
+## Check for missing value
+
+I check for any missing values in the data. Fortunately, there were no missing values.
+
+```{r}
+colSums(is.na(MainData))
+```
+
+***
+
+# Methods: Prepare Data For Analyzation
+
+In order to analyze the distribution of rehabilitation resources according to geographic data, hospital levels, and time information, I reorganized the data based on geographic and time separately.
+
+## Reorganization based on geographic data
+
+I selected the most recent data, which was from 2023, seasons 1 to 4, and grouped them based on geographic data in order to be plotted on the map. This *StrokeRehabGeographic* subset can help us analyze the current state of post-stroke rehabilitation in different *County/City*.
+
+```{r}
+#install.packages("tidyverse")
+library(tidyverse)
+
+StrokeRehabGeographic <- MainData %>% filter (Year == 2023)
+
+StrokeRehabGeographic <- MainData %>% group_by(COUNTYCODE) %>%
+  summarise(
+    COUNTYNAME = first(COUNTYNAME),
+    StrokeRehabNumber = sum(StrokeRehabNumber),
+    StrokeNumber = sum(StrokeNumber),
+    StrokeRehabRate = sum(StrokeRehabNumber) / sum(StrokeNumber)
+  )
+
+summary(StrokeRehabGeographic)
+```
+
+***
+
+# Methods: Prepare Data For Analyzation
+
+## Reorganization based on time data
+
+To select hospitals without missing values for all years and all seasons, I transformed the main dataset into a wide table format using **pivot_wider()** and used **na.omit()** to remove hospitals with missing values. I then used the *hospitalID* from this filtered table to filter the *MainData* again, creating the *StrokeRehabTime* subset. This subset can help us fairly analyze the trend of post-stroke rehabilitation over time.
+
+```{r}
+library(tidyr)
+library(dplyr)
+
+StrokeRehabTime <- MainData[c("Year", "Season", "HospitalID", "HospitalClass",
+                              "StrokeRehabRate", "COUNTYCODE", "COUNTYNAME")] 
+
+StrokeRehabTime <- StrokeRehabTime %>% pivot_wider(
+  names_from = c(Year, Season),
+  values_from = StrokeRehabRate,
+  names_sep = "_"
+  )
+
+#check and delete hospital with missing value in some time during study
+#colSums(is.na(StrokeRehabTime))
+
+StrokeRehabTime <- na.omit(StrokeRehabTime)
+
+StrokeRehabTime <- MainData %>% filter(HospitalID %in% StrokeRehabTime$HospitalID)
+
+summary(StrokeRehabTime)
+```
+
+***
+
+# Results: Rehabilitation Rate in Different County/City
+
+## ANOVA
+
+In 2023, an ANOVA analysis of the rehabilitation rates after stroke, categorized by county, revealed significant differences (p-value = 0.0154).
+
+```{r}
+library(dplyr)
+
+anova_result <- aov(StrokeRehabRate ~ COUNTYNAME, 
+                    data = MainData[MainData$Year == 2023,])
+summary(anova_result)
+```
+
+***
+
+# Results: Rehabilitation Rate in Different County/City
+
+## Visualization with boxplot
+
+The boxplot demonstrates the distribution of rehabilitation rates after stroke according to different *County/City*. 
+
+There were indeed differences between *County/City*. LienChiang County and Penghu County had median rehabilitation rates lower than 50%, suggesting that the offshore islands lack sufficient stroke rehabilitation resources.
+
+```{r}
+library(ggplot2)
+
+ggplot(MainData[MainData$Year == 2023,], 
+       aes(x = COUNTYNAME, y = StrokeRehabRate, fill = COUNTYNAME)) +
+  geom_boxplot(notch = TRUE) +
+  labs(title = "Taiwan Stroke Rehabilitation Rate by County/City",
+       x = "County/City",
+       y = "Stroke Rehab Rate") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+***
+
+# Results: Rehabilitation Rate in Different County/City
+
+## Visualization with Taiwan map
+
+Draw the map using the **tmap** library. The lighter color suggested lower post-stroke rehabilitation rate. You can zoom in with the scroll of the mouse, and you can click on the map to see the rehabilitation rate in each *County/City*. (It will jump to next slide in html format, but you can see it using &larr; back to the current slide and the value.)
+
+As we can see on the map, in addition to LienChiang County and Penghu County, Taitung County, Tainan City, Chiayi County, Chiayi City, Hsinchu County, Keelung City, and surprisingly, the capital of Taiwan, Taipei City, have relatively low rehabilitation rates after stroke.
+
+```{r}
+library(tmap)
+library(dplyr)
+
+TaiwanMapGeographic <- left_join(TaiwanMap, StrokeRehabGeographic, by = c("COUNTYCODE","COUNTYNAME"))
+
+tmap_mode("view")
+
+tm_shape(TaiwanMapGeographic) +
+  tm_polygons("StrokeRehabRate", 
+              palette = "Blues", 
+              #set the popup word with mouse clicking
+              popup.vars = c("COUNTYNAME", "StrokeRehabRate")) + 
+  tm_layout(title = "Taiwan Stroke Rehabilitation Rate by County/City",
+            legend.title.size = 1.2,
+            legend.text.size = 0.8) +
+  tm_view(view.legend.position = c("right", "bottom"))
+```
+
+***
+
+# Results: Rehabilitation Rate in Different Hospital Level
+
+## ANOVA
+
+Similar to previous geographic analysis, in 2023, an ANOVA analysis of the rehabilitation rates after stroke, categorized by *hospital level*, revealed significant differences (p-value = 0.00187).
+
+```{r}
+library(dplyr)
+
+anova_result <- aov(StrokeRehabRate ~ HospitalClass, 
+                    data = MainData[MainData$Year == 2023,])
+summary(anova_result)
+```
+
+***
+
+# Results: Rehabilitation Rate in Different Hospital Level
+
+## Visualization with boxplot
+
+The boxplot demonstrates the distribution of rehabilitation rates after stroke across different *hospital levels*. However, the differences do not appear to be very pronounced in the boxplot. Therefore, I proceed to evaluate the true difference with pairwise t-test and standard difference.
+
+```{r}
+library(ggplot2)
+
+ggplot(MainData[MainData$Year == 2023,], 
+       aes(x = HospitalClass, y = StrokeRehabRate, fill = HospitalClass)) +
+  geom_boxplot(notch = TRUE) +
+  labs(title = "Taiwan Stroke Rehabilitation Rate by Hospital Level",
+       x = "Hospital Level",
+       y = "Stroke Rehab Rate") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+***
+
+# Results: Rehabilitation Rate in Different Hospital Level
+
+## Evaluate the true difference: pairwise t-test
+
+I performed pairwise t-tests using **pairwise.t.test()** function to determine the differences between the three *hospital classes*. Significant differences were found between *medical centers* and *local hospitals* (p-value = 0.009), as well as between *regional hospitals* and *local hospitals* (p-value = 0.024).
+
+```{r}
+pairwise_result <- pairwise.t.test(MainData[MainData$Year == 2023,]$StrokeRehabRate, 
+                                   MainData[MainData$Year == 2023,]$HospitalClass, 
+                                   p.adjust.method = "bonferroni")
+
+pairwise_result
+```
+
+***
+
+# Results: Rehabilitation Rate in Different Hospital Level
+
+## Evaluate the true difference: standard difference
+
+Considering the higher number of data points in local hospitals, which may lead to statistical significance, I further defined a function **standard_difference()** to calculate the standardized difference between the significant differences found in the t-tests above, to evaluate the true effect size.
+
+By considering a standard difference exceeding 0.1 as significant, the results showed that the rehabilitation rate in *local hospitals* was indeed lower than that of *medical centers* (standard difference = 0.298) and *regional hospitals* (standard difference = 0.191).
+
+```{r}
+summary(MainData[MainData$Year == 2023,]$HospitalClass)
+
+#define a function to calculate standard difference
+standard_difference <- function(group1, group2) {
+  mean1 <- mean(group1)
+  mean2 <- mean(group2)
+  sd1 <- sd(group1)
+  sd2 <- sd(group2)
+  pooled_sd <- sqrt(((length(group1) - 1) * sd1^2 + (length(group2) - 1) * sd2^2) / (length(group1) + length(group2) - 2))
+  sd <- (mean1 - mean2) / pooled_sd
+  return(sd)
+}
+
+sd_medical_local <- standard_difference(
+  MainData[MainData$Year == 2023 & 
+             MainData$HospitalClass == "Medical Center",]$StrokeRehabRate, 
+  MainData[MainData$Year == 2023 & 
+             MainData$HospitalClass == "Local Hospital",]$StrokeRehabRate)
+
+sd_regional_local <- standard_difference(
+  MainData[MainData$Year == 2023 & 
+             MainData$HospitalClass == "Regional Hospital",]$StrokeRehabRate, 
+  MainData[MainData$Year == 2023 & 
+             MainData$HospitalClass == "Local Hospital",]$StrokeRehabRate)
+
+print(paste("standard difference between medical center and local hospital:",
+      sd_medical_local))
+
+print(paste("standard difference between regional hospital and local hospital:",
+      sd_regional_local))
+
+```
+
+***
+
+# Results: Rehabilitation Rate Trend with Time
+
+## scatter plot of all the hospitals in the country
+
+I drew a scatter plot and the regression line using **geom_smooth()**. The slope of the regression line was calculated with the **lm()** function.
+
+The positive slope of the regression line, 0.0096, suggests a 0.96% improvement in the post-stroke rehabilitation rate each year. The red shadow around the line represents the 95% confidence interval of the regression line. This figure indicates that the rehabilitation rate across the country is slowly improving.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+StrokeRehabTime <- StrokeRehabTime %>% mutate(
+  YearSeason = as.numeric(Year) + as.numeric(Season) / 4)
+
+ggplot(StrokeRehabTime, aes(x = YearSeason, y = StrokeRehabRate)) +
+  geom_point(aes(group = HospitalID, color = HospitalID), alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", fill = "red", alpha = 0.2) +
+  labs(title = "Stroke Rehabilitation Rates Over Time",
+       x = "Year-Season",
+       y = "Stroke Rehabilitation Rate") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+Slope <- coef(lm(StrokeRehabRate ~ YearSeason, data = StrokeRehabTime))["YearSeason"]
+
+print(paste("The slope of regression line is", Slope))
+```
+
+***
+
+# Results: Rehabilitation Rate Trend with Time
+
+## Identify the change by county/city
+
+I classify each hospital by *COUNTYCODE*, calculate the stroke rehabilitation rate for each *County/City* over time, and then compute the slope of the rate change over time for each *County/City*.
+
+```{r}
+#install.packages("broom")
+library(dplyr)
+library(broom)
+
+StrokeRehabTimeGeographic <- StrokeRehabTime %>% 
+  group_by(YearSeason, COUNTYCODE) %>%
+  #calculate number for each County/City in different time first
+  summarise(
+    StrokeRehabNumber = sum(StrokeRehabNumber),
+    StrokeNumber = sum(StrokeNumber),
+    StrokeRehabRate = StrokeRehabNumber / StrokeNumber
+  ) %>%
+  ungroup() %>%
+  #calculate the slope in each County/City over time
+  group_by(COUNTYCODE) %>%
+  do(tidy(lm(StrokeRehabRate ~ YearSeason, data = .))) %>%
+  filter(term == "YearSeason") %>%
+  select(COUNTYCODE, estimate) %>%
+  rename(Slope = estimate)
+```
+
+Plot the slope of the change in stroke rehabilitation rate by *County/City* onto a map of Taiwan. You can zoom in with the scroll of the mouse, and you can click on the map to see the change in rehabilitation rate each year in each *County/City*. (It will jump to next slide in html format, but you can see it using &larr; back to the current slide and the value.)
+
+As we can see, the only city with a gradual decrease in stroke rehabilitation rate over time is Hsinchu County. Nantou County and Keelung City showed the most improvement over time.
+
+```{r}
+library(tmap)
+library(dplyr)
+
+TaiwanMapTimeNegative <- left_join(TaiwanMap, StrokeRehabTimeGeographic, 
+                                   by = "COUNTYCODE")
+
+tmap_mode("view")
+
+tm_shape(TaiwanMapTimeNegative) +
+  tm_polygons("Slope", 
+              palette = "Blues", 
+              popup.vars = c("COUNTYNAME", "Slope")) +
+  tm_layout(title = "Taiwan Stroke Rehabilitation Rate Change by Year",
+            legend.title.size = 1.2,
+            legend.text.size = 0.8) +
+  tm_view(view.legend.position = c("right", "bottom"))
+```
+
+***
+
+# Discussion/Future Directions
+
+- There was significant difference in rehabilitation rate after stroke between county/city. LienChiang County, Penghu County, Taitung County, Tainan City, Chiayi County, Chiayi City, Hsinchu County, Keelung City, and the capital of Taiwan, Taipei City, have relatively low rehabilitation rates after stroke.
+
+  - These results indicate that rehabilitation resources for stroke patients are unevenly distributed across different counties and cities at current state.
+
+  - However, since this dataset represents the rehabilitation rate for patients who have been admitted to acute care hospitals, it does not accurately reflect the distribution of medical resources.
+
+</br>
+
+- The rehabilitation rate was lower in patients who were admitted to local hospitals for acute care compared to those admitted to medical centers and regional hospitals. 
+
+  - This disparity may indicate the presence of healthcare inequality in rehabilitation referrals across different hospital levels. For example, rehabilitation hospitals might prefer to accept patients from medical centers because they often rely on medical centers to handle difficult cases. This topic warrants further investigation.
+
+</br>
+
+- The rehabilitation rate in the whole country is slowly improving.
+  - Nantou County and Keelung City showed the most improvement over time.
+  - Hsinchu County is the only region with a decreased rehabilitation rate over time. The actual reason warrants further investigation.
+
+***
+
+# Reference
+
+1.	National Health Insurance Administration MoHaW. Rate of Stroke Patients Receiving Rehabilitation Services During Hospitalization or Within Four Months After Discharge 2024 [Available from: https://data.gov.tw/dataset/79568. ]
+
+2.	Interior TMot. Administrative Boundary Maps of Municipalities and Counties (Cities) in Our Country 2020 [Available from: https://www.tgos.tw/MDE/MetaData/CRUD/ViewMetaData?GUID=801bf681-5fbf-4185-9b46-3760eaba4e63&VIEW_TYPE=only&SOURCE=1. ]
