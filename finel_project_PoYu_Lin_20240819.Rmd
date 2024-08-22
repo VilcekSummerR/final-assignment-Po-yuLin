@@ -1,3 +1,4 @@
+FL Note: A grade; Well done! My only note would be when providing ANOVA, it is helpful to also list the mean differences/mean values of the groups so readers can put things in context. 
 ---
 title: 'Final Project: Analysis of Rehabilitation Rates for Stroke Patients in Taiwan '
 author: "PoYu Lin"
